@@ -16,22 +16,20 @@ def load_message(db_conn, message):
             (timestamp,
             channel,
             raw_message,
-            raw_label_field,
-            raw_data_field,
-            raw_ssm_field,
             raw_parity_field,
+            raw_data_field,
+            raw_label_field,
             processed_label_field,
             message_group,
             processed_data_field)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             now,
             message['channel'],
             message['raw_message'],
-            message['raw_fields']['label'],
-            message['raw_fields']['data'],
-            message['raw_fields']['ssm'],
             message['raw_fields']['parity'],
+            message['raw_fields']['data'],
+            message['raw_fields']['label'],
             message['processed_fields']['label'],
             message['message_group'],
             message['processed_fields']['data']

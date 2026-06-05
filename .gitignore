@@ -1,4 +1,4 @@
-arinc_429_log.db
-arinc_429_log.db-shm
-arinc_429_log.db-wal
+arinc_429_messages.db
+arinc_429_messages.db-shm
+arinc_429_messages.db-wal
 __pycache__

@@ -1,16 +1,8 @@
 from decimal import Decimal, getcontext
+from typing import TypedDict
 
 
 getcontext().prec = 40
-
-
-def binary_to_decimal(bin_str):
-    try:
-        decimal_val = int(bin_str, 2)
-        return decimal_val
-    except ValueError as e:
-        print(f"[ERROR] Value error: {e}")
-        return None
 
 
 def transform_message(raw_message):
@@ -31,42 +23,7 @@ def transform_message(raw_message):
     else:
         message_group = None
 
-    processed_data = None
-    match processed_label:
-        case "210" | "211":
-            raw_val = binary_to_decimal(raw_message['fields']['data'])
-            if raw_val is not None:
-                scale = Decimal("90") / (Decimal("2") ** 20)
-                processed_data = (scale * Decimal(raw_val)).normalize()
-                processed_data = format(processed_data, 'f')
-
-        case "223":
-            raw_val = binary_to_decimal(raw_message['fields']['data'])
-            if raw_val is not None:
-                scale = Decimal("65536") / (Decimal("2") ** 20)
-                processed_data = (scale * Decimal(raw_val)).normalize()
-                processed_data = format(processed_data, 'f')
-
-        case "266" | "267" | "264":
-            raw_val = binary_to_decimal(raw_message['fields']['data'])
-            if raw_val is not None:
-                scale = Decimal("3034.3168") / (Decimal("2") ** 20)
-                processed_data = (scale * Decimal(raw_val)).normalize()
-                processed_data = format(processed_data, 'f')
-
-        case "127":
-            raw_val = binary_to_decimal(raw_message['fields']['data'])
-            if raw_val is not None:
-                scale = Decimal("104857.6") / (Decimal("2") ** 20)
-                processed_data = (scale * Decimal(raw_val)).normalize()
-                processed_data = format(processed_data, 'f')
-
-        case "320":
-            raw_val = binary_to_decimal(raw_message['fields']['data'][:15])
-            if raw_val is not None:
-                scale = Decimal("16384") / (Decimal("2") ** 14)
-                processed_data = (scale * Decimal(raw_val)).normalize()
-                processed_data = format(processed_data, 'f')
+    processed_data = get_processed_data_by_label(processed_label, raw_message['fields']['data'])
 
     processed_message = {
         "channel": raw_message['channel'],
@@ -74,7 +31,6 @@ def transform_message(raw_message):
         "raw_fields": {
             "label": raw_message['fields']['label'],
             "data": raw_message['fields']['data'],
-            "ssm": raw_message['fields']['ssm'],
             "parity": raw_message['fields']['parity'],
         },
         "processed_fields": {
@@ -85,3 +41,105 @@ def transform_message(raw_message):
     }
 
     return processed_message
+
+
+def get_processed_data(
+    binary_str: str,
+    start_pos: int,
+    end_pos: int,
+    min_val: float,
+    max_val: float
+) -> str | None:
+    if max_val < min_val:
+        return None
+    
+    if not (0 <= start_pos < end_pos <= len(binary_str)):
+        return None
+    bit_count = end_pos - start_pos
+
+    sub_str = binary_str[start_pos:end_pos]
+
+    try:
+        raw_val = int(sub_str, 2)
+    except ValueError:
+        return None
+        
+    min_decimal = Decimal(str(min_val))
+    max_decimal = Decimal(str(max_val))
+    
+    scale = (max_decimal - min_decimal) / (Decimal(2) ** bit_count)
+
+    result = (scale * Decimal(raw_val)).normalize() + min_decimal
+
+    return format(result, 'f')
+
+
+def get_processed_data_by_label(label: str, raw_data: str):
+    class LabelConfig(TypedDict):
+        start_pos: int
+        end_pos: int
+        min_val: float
+        max_val: float
+
+    LABEL_CONFIG: dict[str, LabelConfig] = {
+        "210": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 90 * 2,
+        },
+        "211": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 90 * 2,
+        },
+        "223": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 65536 * 2,
+        },
+        "266": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 3034.3168 * 2,
+        },
+        "267": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 3034.3168 * 2,
+        },
+        "264": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 3034.3168 * 2,
+        },
+        "127": {
+            "start_pos": 2,
+            "end_pos": 23,
+            "min_val": 0,
+            "max_val": 104857.6 * 2,
+        },
+        "320": {
+            "start_pos": 2,
+            "end_pos": 17,
+            "min_val": 0,
+            "max_val": 16384 * 2,
+        },
+    }
+
+    config = LABEL_CONFIG.get(label)
+    if not config:
+        return None
+    
+    return get_processed_data(
+        raw_data,
+        config["start_pos"],
+        config["end_pos"],
+        config["min_val"],
+        config["max_val"],
+    )

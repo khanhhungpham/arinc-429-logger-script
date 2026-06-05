@@ -1,105 +1,36 @@
 import argparse
-import socket
-import time
+import sqlite3
 
-from init_db import init_db
+from extract_message import extract_message
 from load_message import load_message
 from transform_message import transform_message
 
 
-def decode_arinc_429_word(raw_str):
-    if not raw_str or len(raw_str) != 9:
-        return None
+def get_db():
+    conn = sqlite3.connect("arinc_429_messages.db")
+    conn.execute('PRAGMA journal_mode=WAL;')
 
-    try:
-        first_char = raw_str[0]
-        if not first_char.isupper():
-            return None
-        channel = ord(first_char) - 64
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS arinc_429_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME,
+            channel INTEGER,
+            raw_message TEXT,
+            raw_parity_field TEXT,
+            raw_data_field TEXT,
+            raw_label_field TEXT,
+            processed_label_field TEXT,
+            message_group TEXT,
+            processed_data_field TEXT
+        )
+    ''')
 
-        payload = raw_str[1:]
-        reversed_payload = payload[::-1]
-
-        binary_str = ""
-        for char in reversed_payload:
-            val = ord(char) - 97
-            if 0 <= val <= 15:
-                binary_str += format(val, '04b')
-            else:
-                return None
-
-        final_bits = binary_str[::-1]
-
-        parity = final_bits[0]
-        ssm    = final_bits[1:3]
-        data   = final_bits[3:24]
-        label  = final_bits[24:32]
-
-        result = {
-            "channel": channel,
-            "binary": final_bits,
-            "fields": {
-                "parity": parity,
-                "ssm": ssm,
-                "data": data,
-                "label": label
-            }
-        }
-        print(result)
-        return result
-
-    except Exception as e:
-        print(f"[ERROR] Decoding: {e}")
-        return None
-
-
-def start_client(host, port):
-    db_conn = init_db()
-    try:
-        while True:
-            buffer = ""
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-                    print(f"[INFO] Connecting to the ARINC 429 LAN board at {host}:{port}...")
-                    client_socket.settimeout(5)
-                    client_socket.connect((host, port))
-                    print(f"[INFO] Connected to the ARINC 429 LAN board at {host}:{port}")
-
-                    while True:
-                        data = client_socket.recv(4096)
-
-                        if not data:
-                            print("[INFO] Connection closed")
-                            break
-
-                        buffer += data.decode('ascii', errors='ignore')
-                        lines = buffer.split('\n')
-                        buffer = lines.pop()
-
-                        for line in lines:
-                            print(f"Line: {line}")
-                            print(f"Length: {len(line)}")
-
-                            raw_message = decode_arinc_429_word(line)
-                            if raw_message:
-                                processed_message = transform_message(raw_message)
-                                load_message(db_conn, processed_message)
-
-                            print()
-
-            except Exception as e:
-                print(f"[ERROR] Network: {e}")
-
-            print("[INFO] Reconnecting...")
-            time.sleep(1)
-    finally:
-        db_conn.close()
-        print("[INFO] Database connection closed")
+    return conn
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TCP client receiving data from an ARINC 429 LAN board")
-    
     parser.add_argument(
         "--host", 
         type=str, 
@@ -112,6 +43,11 @@ if __name__ == "__main__":
         default=10001, 
         help="Board port number (default: 10001)"
     )
-
     args = parser.parse_args()
-    start_client(args.host, args.port)
+
+    db_conn = get_db()
+    for raw_message in extract_message(args.host, args.port):
+        if raw_message:
+            processed_message = transform_message(raw_message)
+            if processed_message:
+                load_message(db_conn, processed_message)
