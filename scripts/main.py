@@ -1,115 +1,29 @@
 import argparse
-import socket
-import time
 
-from init_db import init_db
-from load_message import load_message
-from transform_message import transform_message
-
-
-def decode_arinc_429_word(raw_str):
-    if not raw_str or len(raw_str) != 9:
-        return None
-
-    try:
-        first_char = raw_str[0]
-        if not first_char.isupper():
-            return None
-        channel = ord(first_char) - 64
-
-        payload = raw_str[1:]
-        reversed_payload = payload[::-1]
-
-        binary_str = ""
-        for char in reversed_payload:
-            val = ord(char) - 97
-            if 0 <= val <= 15:
-                binary_str += format(val, '04b')
-            else:
-                return None
-
-        final_bits = binary_str[::-1]
-
-        parity = final_bits[0]
-        data   = final_bits[1:24]
-        label  = final_bits[24:32]
-
-        result = {
-            "channel": channel,
-            "binary": final_bits,
-            "fields": {
-                "parity": parity,
-                "data": data,
-                "label": label
-            }
-        }
-        print(result)
-        return result
-
-    except Exception as e:
-        print(f"[ERROR] Decoding: {e}")
-        return None
-
-
-def start_client(host, port):
-    db_conn = init_db()
-    try:
-        while True:
-            buffer = ""
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-                    print(f"[INFO] Connecting to the ARINC 429 LAN board at {host}:{port}...")
-                    client_socket.settimeout(5)
-                    client_socket.connect((host, port))
-                    print(f"[INFO] Connected to the ARINC 429 LAN board at {host}:{port}")
-
-                    while True:
-                        data = client_socket.recv(4096)
-
-                        if not data:
-                            print("[INFO] Connection closed")
-                            break
-
-                        buffer += data.decode('ascii', errors='ignore')
-                        lines = buffer.split('\n')
-                        buffer = lines.pop()
-
-                        for line in lines:
-                            print(f"Line: {line}")
-                            print(f"Length: {len(line)}")
-
-                            raw_message = decode_arinc_429_word(line)
-                            if raw_message:
-                                processed_message = transform_message(raw_message)
-                                load_message(db_conn, processed_message)
-
-                            print()
-
-            except Exception as e:
-                print(f"[ERROR] Network: {e}")
-
-            print("[INFO] Reconnecting...")
-            time.sleep(1)
-    finally:
-        db_conn.close()
-        print("[INFO] Database connection closed")
-
+from scripts.extract.extract_message_from_board import extract_message_from_board
+from scripts.load.load_message import load_message
+from scripts.transform.transform_message import transform_message
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TCP client receiving data from an ARINC 429 LAN board")
-    
-    parser.add_argument(
-        "--host", 
-        type=str, 
-        default="192.168.24.190", 
-        help="Board IP address (default: 192.168.24.190)"
+    parser = argparse.ArgumentParser(
+        description="TCP client receiving data from an ARINC 429 LAN board"
     )
+
     parser.add_argument(
-        "--port", 
-        type=int, 
-        default=10001, 
-        help="Board port number (default: 10001)"
+        "--host",
+        type=str,
+        default="192.168.24.190",
+        help="board ip address (default: 192.168.24.190)",
+    )
+
+    parser.add_argument(
+        "--port", type=int, default=10001, help="board port number (default: 10001)"
     )
 
     args = parser.parse_args()
-    start_client(args.host, args.port)
+
+    for raw_message in extract_message_from_board(args.host, args.port):
+        if raw_message:
+            processed_message = transform_message(raw_message)
+            if processed_message:
+                load_message(processed_message)

@@ -1,4 +1,3 @@
-arinc_429_log.db
-arinc_429_log.db-shm
-arinc_429_log.db-wal
 __pycache__
+
+outputs/
